@@ -162,7 +162,7 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: int) -> No
     plt.show()
 
 
-def format_excel_file(file_dir: str) -> None:
+def format_general_sheet(file_dir: str) -> None:
     """
     Format the Excel file. This formatting involves removing the blank rows, setting the column header,
     setting the column, row width and height and, setting the font size and alignment.
@@ -171,11 +171,11 @@ def format_excel_file(file_dir: str) -> None:
         file_dir: The file directory of the Excel file
     """
     wb = openpyxl.load_workbook(file_dir)
-    ws = wb.active
-
-    # create a new sheet if the sheet does not exist
-    if "Experimental" not in wb.sheetnames:
-        wb.create_sheet("Experimental")
+    if "General" in wb.sheetnames:
+        ws = wb["General"]
+    else:
+        print(">>> The sheet 'General' does not exist!")
+        return None
 
     # remove the blank rows
     ws.delete_rows(3)
@@ -205,9 +205,70 @@ def format_excel_file(file_dir: str) -> None:
         ws.cell(row=1, column=i).font = Font(size=12, bold=True)
         ws.cell(row=2, column=i).font = Font(size=10, bold=True)
 
+    for i in range(1, 23):
+        ws.cell(row=i, column=1).font = Font(size=10, bold=True)
+
     # create the borders
     for i in range(1, 23):
         for j in range(1, 194):
+            ws.cell(row=i, column=j).border = Border(
+                left=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
+                right=openpyxl.styles.borders.Side(border_style='thin',
+                                                   color='000000'),
+                top=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
+                bottom=openpyxl.styles.borders.Side(border_style='thin',
+                                                    color='000000'))
+
+    wb.save(file_dir)
+
+
+def format_experimental_sheet(file_dir: str) -> None:
+    """
+    Format the Excel file. This formatting involves removing the blank rows, setting the column header,
+    setting the column, row width and height and, setting the font size and alignment.
+
+    Args:
+        file_dir: The file directory of the Excel file
+    """
+    wb = openpyxl.load_workbook(file_dir)
+    if "Experimental" in wb.sheetnames:
+        ws = wb["Experimental"]
+    else:
+        print(">>> The sheet 'Experimental' does not exist!")
+        return None
+
+    # set the column header
+    ws['A1'] = "File Index"
+    ws['B1'] = "Ranking"
+
+    # set the column width
+    for i in range(2, ws.max_column + 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 15
+
+    # set the column of the file index column
+    ws.column_dimensions[openpyxl.utils.get_column_letter(1)].width = 20
+
+    # set the row height
+    for i in range(1, ws.max_row + 1):
+        ws.row_dimensions[i].height = 20
+
+    # set the font size and alignment
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=i, column=j).font = Font(size=10)
+            ws.cell(row=i, column=j).alignment = Alignment(horizontal='center', vertical='center')
+
+    # set the column header font size and font bold
+    for i in range(1, ws.max_column + 1):
+        ws.cell(row=1, column=i).font = Font(size=10, bold=True)
+
+    for i in range(1, ws.max_row + 1):
+        ws.cell(row=i, column=1).font = Font(size=12, bold=True)
+        ws.cell(row=i, column=2).font = Font(size=10, bold=True)
+
+    # create the borders
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
             ws.cell(row=i, column=j).border = Border(
                 left=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
                 right=openpyxl.styles.borders.Side(border_style='thin',
