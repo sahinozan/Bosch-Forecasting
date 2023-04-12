@@ -6,7 +6,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import openpyxl
-from openpyxl.styles import Font, Alignment, Border
+from openpyxl import styles
+from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
@@ -46,7 +47,7 @@ def find_common_pipes(file_index: int,
 
     # rename the columns
     top_20_pipes.columns = ["X", *range(1, 21)]
-    top_20_pipes.index = ['Pipe TTNr', 'Total']
+    top_20_pipes.index = pd.Index(['Pipe TTNr', 'Total'])
 
     # add the top 20 pipes to the top_level_df
     top_level_df = pd.concat([top_level_df, top_20_pipes], axis=0)
@@ -79,6 +80,13 @@ def configure_matplotlib(labelsize: int = 18,
     plt.rcParams['axes.titlepad'] = titlepad
     plt.rcParams['figure.dpi'] = dpi
 
+    # change the background color of the figure
+    plt.rcParams['figure.facecolor'] = 'none'
+    plt.rcParams['axes.facecolor'] = 'none'
+
+    # change the color of the grid
+    plt.rcParams['axes.grid'] = False
+
 
 def hex_to_RGB(hex_str) -> list[int]:
     """
@@ -92,7 +100,7 @@ def hex_to_RGB(hex_str) -> list[int]:
     return [int(hex_str[x:x + 2], 16) for x in range(1, 6, 2)]
 
 
-def get_color_gradient(c1, c2, n) -> list[hex]:
+def get_color_gradient(c1, c2, n) -> list[str]:
     """
     Given two hex colors, returns a color gradient
     with n colors.
@@ -113,7 +121,7 @@ def get_color_gradient(c1, c2, n) -> list[hex]:
     return ["#" + "".join([format(int(round(val * 255)), "02x") for val in item]) for item in rgb_colors]
 
 
-def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: int) -> None:
+def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: str) -> None:
     """
     Creates a bar plot for the selected year and file index
 
@@ -147,7 +155,9 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: int) -> No
                 palette=get_color_gradient("#1f77b4", "#ff7f0e", 20))
 
     # disable outline of the bars
-    sns.despine(fig=None, ax=None, top=False, right=False, left=False, bottom=False, offset=None, trim=False)
+    # sns.despine(fig=fig, ax=ax, top=False, right=False, left=False, bottom=False, offset=False, trim=False)
+
+    sns.despine(fig=fig, ax=ax, top=True, right=True, left=True, bottom=True)
 
     # rotate the x-ticks
     plt.xticks(rotation=90)
@@ -158,6 +168,37 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: int) -> No
     plt.xlabel("Pipe TTNr", labelpad=25)
     plt.ylabel("Total Quantity", labelpad=25)
     plt.title(f"Top 20 Pipes in {selected_file}", pad=25)
+
+    plt.show()
+
+
+def unique_pipe_bar_plot(final_df: pd.DataFrame) -> None:
+    """
+    Creates a bar plot for the unique pipes
+    Args:
+        final_df: The dataframe that contains the data (final_df)
+    """
+    configure_matplotlib()
+    fig, ax = plt.subplots(figsize=(15, 20))
+
+    # sorted plot
+    ax = sns.barplot(y="Pipe TTNr",
+                     x="Total",
+                     data=final_df.loc[final_df["Pipe TTNr"].apply(lambda x: x.isnumeric()), :].copy())
+
+    # add grid lines
+    ax.grid(axis="x", color="black", linestyle="dashed", linewidth=0.5)
+
+    sns.despine(fig=fig, ax=ax, top=True, right=True, left=True, bottom=True)
+
+    # rotate the x-ticks
+    plt.xticks(rotation=90)
+
+    # add padding to x-ticks
+    plt.tick_params(axis='y', which='major', pad=10)
+
+    plt.ylabel("Pipe TTNr", labelpad=25)
+    plt.xlabel("Total Quantity", labelpad=25)
 
     plt.show()
 
@@ -186,13 +227,14 @@ def format_general_sheet(file_dir: str) -> None:
     # set the column width
     for i in range(1, 194):
         if i % 2 == 0:
-            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 15
+            ws.column_dimensions[get_column_letter(i)].width = 15  # type: ignore
         elif i % 2 == 1:
-            ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 10
+            ws.column_dimensions[get_column_letter(i)].width = 10  # type: ignore
 
     # set the row height
     for i in range(1, 23):
-        ws.row_dimensions[i].height = 20
+        ws.row_dimensions[i].height = 20  # type: ignore
+        openpyxl.worksheet.dimensions.Dimensions(row=i, height=20)  # type: ignore
 
     # set the font size and alignment
     for i in range(1, 23):
@@ -212,12 +254,12 @@ def format_general_sheet(file_dir: str) -> None:
     for i in range(1, 23):
         for j in range(1, 194):
             ws.cell(row=i, column=j).border = Border(
-                left=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
-                right=openpyxl.styles.borders.Side(border_style='thin',
-                                                   color='000000'),
-                top=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
-                bottom=openpyxl.styles.borders.Side(border_style='thin',
-                                                    color='000000'))
+                left=styles.borders.Side(border_style='thin', color='000000'),
+                right=styles.borders.Side(border_style='thin',
+                                          color='000000'),
+                top=styles.borders.Side(border_style='thin', color='000000'),
+                bottom=styles.borders.Side(border_style='thin',
+                                           color='000000'))
 
     wb.save(file_dir)
 
@@ -243,14 +285,14 @@ def format_experimental_sheet(file_dir: str) -> None:
 
     # set the column width
     for i in range(2, ws.max_column + 1):
-        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = 15
+        ws.column_dimensions[get_column_letter(i)].width = 15  # type: ignore
 
     # set the column of the file index column
-    ws.column_dimensions[openpyxl.utils.get_column_letter(1)].width = 20
+    ws.column_dimensions[get_column_letter(1)].width = 20  # type: ignore
 
     # set the row height
     for i in range(1, ws.max_row + 1):
-        ws.row_dimensions[i].height = 20
+        ws.row_dimensions[i].height = 20  # type: ignore
 
     # set the font size and alignment
     for i in range(1, ws.max_row + 1):
@@ -270,12 +312,12 @@ def format_experimental_sheet(file_dir: str) -> None:
     for i in range(1, ws.max_row + 1):
         for j in range(1, ws.max_column + 1):
             ws.cell(row=i, column=j).border = Border(
-                left=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
-                right=openpyxl.styles.borders.Side(border_style='thin',
-                                                   color='000000'),
-                top=openpyxl.styles.borders.Side(border_style='thin', color='000000'),
-                bottom=openpyxl.styles.borders.Side(border_style='thin',
-                                                    color='000000'))
+                left=Side(border_style='thin', color='000000'),
+                right=Side(border_style='thin',
+                           color='000000'),
+                top=Side(border_style='thin', color='000000'),
+                bottom=Side(border_style='thin',
+                            color='000000'))
 
     wb.save(file_dir)
 
