@@ -15,10 +15,11 @@ def find_common_pipes(file_index: int,
                       file_year: int,
                       top_level_df: pd.DataFrame,
                       file_dict: dict[int, list[str]],
-                      master_dir: str
+                      master_dir: str,
+                      threshold: int = 20
                       ) -> pd.DataFrame:
     """
-    Finds the top 20 produced pipes for the selected production plan
+    Finds the most produced pipes for the selected production plan
 
     Args:
         file_index: The file index (4, 9, 27, 36, 41,...)
@@ -26,13 +27,14 @@ def find_common_pipes(file_index: int,
         top_level_df: The top level dataframe
         file_dict: The file dictionary
         master_dir: The master directory
+        threshold: The number of pipes to be selected
 
     Returns:
-        The top level dataframe with the top 20 pipes for the selected production plan
+        The top level dataframe with the most produced pipes for the selected production plan
     """
     df = pd.read_excel(f'{master_dir}/{str(file_year)}/{file_dict[file_year][file_index]}', sheet_name='Pivot')
 
-    # add the total quantity column
+    df.iloc[:, 5:26] = df.iloc[:, 5:26].apply(pd.to_numeric, errors='coerce')
     df['Total'] = df.iloc[:, 5:26].sum(axis=1)
     df.loc["Hat", "Total"] = 0
 
@@ -40,17 +42,19 @@ def find_common_pipes(file_index: int,
     df.sort_values(by=['Total'], inplace=True, ascending=False)
 
     # transpose the dataframe and select the top 20 pipes
-    top_20_pipes = df.iloc[:20, [1, -1]].T
+    top_20_pipes = df.iloc[:threshold, [1, -1]].T
 
     # insert an empty column to first position
     top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
 
     # rename the columns
-    top_20_pipes.columns = ["X", *range(1, 21)]
-    top_20_pipes.index = pd.Index(['Pipe TTNr', 'Total'])
+    top_20_pipes.columns = ["X", *range(1, threshold + 1)]
+
+    top_20_pipes.index = ['Pipe TTNr', 'Total']
 
     # add the top 20 pipes to the top_level_df
     top_level_df = pd.concat([top_level_df, top_20_pipes], axis=0)
+
     return top_level_df
 
 
@@ -121,7 +125,11 @@ def get_color_gradient(c1, c2, n) -> list[str]:
     return ["#" + "".join([format(int(round(val * 255)), "02x") for val in item]) for item in rgb_colors]
 
 
-def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: str) -> None:
+def create_bar_plot(df: pd.DataFrame,
+                    selected_year: int,
+                    file_index: str,
+                    ascending: bool = True,
+                    threshold: int = 20) -> None:
     """
     Creates a bar plot for the selected year and file index
 
@@ -129,6 +137,8 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: str) -> No
         df: The dataframe that contains the data (exp_df)
         selected_year: The selected year (2021, 2022, 2023)
         file_index: The file index (4, 9, 27, 36, 41,...)
+        ascending: If the plot should be sorted ascending or descending
+        threshold: The number of pipes to be selected
     """
     if len(str(file_index)) == 1:
         file_index = "0" + str(file_index)
@@ -147,15 +157,15 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: str) -> No
                 data=df,
                 x=df[(str(selected_year), selected_file, "Pipe TTNr")],
                 y=df[(str(selected_year), selected_file, "Total")],
-                order=df.sort_values(by=(str(selected_year), selected_file, "Total"), ascending=True).head(20)[
-                    (str(selected_year), selected_file, "Pipe TTNr")],
+                order=df.sort_values(by=(str(selected_year), selected_file, "Total"), ascending=ascending).head(
+                    threshold)[(str(selected_year), selected_file, "Pipe TTNr")],
+
                 color="blue",
+                hue_order=df.sort_values(by=(str(selected_year), selected_file, "Total"), ascending=ascending).head(
+                    threshold)[(str(selected_year), selected_file, "Pipe TTNr")],
                 label=selected_file,
                 errorbar=None,
-                palette=get_color_gradient("#1f77b4", "#ff7f0e", 20))
-
-    # disable outline of the bars
-    # sns.despine(fig=fig, ax=ax, top=False, right=False, left=False, bottom=False, offset=False, trim=False)
+                palette=get_color_gradient("#1f77b4", "#ff7f0e", threshold))
 
     sns.despine(fig=fig, ax=ax, top=True, right=True, left=True, bottom=True)
 
@@ -167,38 +177,95 @@ def create_bar_plot(df: pd.DataFrame, selected_year: int, file_index: str) -> No
 
     plt.xlabel("Pipe TTNr", labelpad=25)
     plt.ylabel("Total Quantity", labelpad=25)
-    plt.title(f"Top 20 Pipes in {selected_file}", pad=25)
+    plt.title(f"Top {threshold} Pipes in {selected_file}", pad=25)
 
     plt.show()
 
 
-def unique_pipe_bar_plot(final_df: pd.DataFrame) -> None:
+def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
+                         total_quantity_limit: int,
+                         fig_size: tuple = (16, 20),
+                         rotation: str = 'horizontal',
+                         ascending: bool = True,
+                         threshold: int = 20) -> None:
     """
     Creates a bar plot for the unique pipes
     Args:
-        final_df: The dataframe that contains the data (final_df)
+        pipe_df: The dataframe that contains the data (final_df)
+        total_quantity_limit: The minimum total quantity limit
+        fig_size: The figure size
+        rotation: The rotation of the x-axis labels
+        ascending: If the plot should be sorted ascending or descending
+        threshold: The number of pipes to be selected
     """
     configure_matplotlib()
-    fig, ax = plt.subplots(figsize=(15, 20))
+    fig, ax = plt.subplots(figsize=fig_size)
 
-    # sorted plot
-    ax = sns.barplot(y="Pipe TTNr",
-                     x="Total",
-                     data=final_df.loc[final_df["Pipe TTNr"].apply(lambda x: x.isnumeric()), :].copy())
+    if rotation == 'horizontal':
+        # horizontal plot (better with more labels)
+        ax = sns.barplot(y="Pipe TTNr",
+                         x="Total",
+                         data=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                         pipe_df["Total"] > total_quantity_limit), :].copy(),
+                         order=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                          pipe_df["Total"] > total_quantity_limit), :].copy(
 
-    # add grid lines
-    ax.grid(axis="x", color="black", linestyle="dashed", linewidth=0.5)
+                         ).sort_values(
+                             by="Total", ascending=ascending).head(threshold)["Pipe TTNr"],
+                         color="blue",
+                         errorbar=None,
+                         palette=get_color_gradient("#1f77b4", "#ff7f0e", threshold),
+                         hue_order=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                              pipe_df["Total"] > total_quantity_limit), :].copy()[
+                             "Pipe TTNr"].unique()
+                         )
+
+        plt.ylabel("Pipe TTNr", labelpad=25)
+        plt.xlabel("Total Quantity", labelpad=25)
+
+        # add grid lines
+        ax.grid(axis="x", color="black", linestyle="dashed", linewidth=0.5)
+
+        # add padding to y-ticks
+        plt.tick_params(axis='x', which='major', pad=10)
+    elif rotation == 'vertical':
+        # vertical plot (better with fewer labels)
+        ax = sns.barplot(x="Pipe TTNr",
+                         y="Total",
+                         data=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                         pipe_df["Total"] > total_quantity_limit), :].copy(),
+                         order=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                          pipe_df["Total"] > total_quantity_limit), :].copy(
+
+                         ).sort_values(
+                             by="Total", ascending=ascending).head(threshold)["Pipe TTNr"],
+                         color="blue",
+                         errorbar=None,
+                         palette=get_color_gradient("#1f77b4", "#ff7f0e", threshold),
+                         hue_order=pipe_df.loc[np.logical_and(pipe_df["Pipe TTNr"].apply(lambda x: x.isnumeric()),
+                                                              pipe_df["Total"] > total_quantity_limit), :].copy()[
+                             "Pipe TTNr"].unique()
+                         )
+        plt.xlabel("Pipe TTNr", labelpad=25)
+        plt.ylabel("Total Quantity", labelpad=25)
+
+        # add grid lines
+        ax.grid(axis="y", color="black", linestyle="dashed", linewidth=0.5)
+
+        # add padding to y-ticks
+        plt.tick_params(axis='y', which='major', pad=10)
+    else:
+        raise ValueError("rotation must be either 'horizontal' or 'vertical'")
 
     sns.despine(fig=fig, ax=ax, top=True, right=True, left=True, bottom=True)
 
     # rotate the x-ticks
-    plt.xticks(rotation=90)
+    plt.xticks(rotation=90, fontsize=12)
 
-    # add padding to x-ticks
-    plt.tick_params(axis='y', which='major', pad=10)
+    # set the font size of the y-ticks
+    plt.yticks(fontsize=12)
 
-    plt.ylabel("Pipe TTNr", labelpad=25)
-    plt.xlabel("Total Quantity", labelpad=25)
+    plt.title("Overall Top Pipes (2021-2023)", pad=25)
 
     plt.show()
 
@@ -234,7 +301,6 @@ def format_general_sheet(file_dir: str) -> None:
     # set the row height
     for i in range(1, 23):
         ws.row_dimensions[i].height = 20  # type: ignore
-        openpyxl.worksheet.dimensions.Dimensions(row=i, height=20)  # type: ignore
 
     # set the font size and alignment
     for i in range(1, 23):
