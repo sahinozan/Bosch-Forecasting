@@ -11,6 +11,298 @@ from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 
+def create_transposed_and_unique_df(master_df: pd.DataFrame, sheet_names: list[str],
+                                    file_dir) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Transpose the dataframe and create a multi-level index dataframe
+    Drop unnecessary columns and rows and write the dataframe to an excel file
+
+    Args:
+        master_df: The dataframe to be transposed
+        sheet_names: The names of the sheets
+        file_dir: The directory of the excel file
+
+    Returns:
+        A tuple of the dataframe and the multi-level index dataframe (transposed)
+    """
+    # transpose the dataframe
+    master_df_T = master_df.copy().T
+    master_df_T.columns, master_df_T.loc["X", :] = master_df_T.loc[["X"], :].values[0], master_df_T.columns
+
+    # create multilevel columns
+    exp_df = pd.DataFrame(columns=pd.MultiIndex.from_product([master_df_T.columns, ["Pipe TTNr", "Total"]]).unique())
+
+    # add the data to the multilevel columns
+    for i in range(len(master_df_T)):
+        exp_df.loc[i, :] = master_df_T.iloc[i, :].values
+
+    # drop the unnecessary index
+    exp_df = exp_df.copy().drop(index=0, inplace=False)
+
+    write_to_excel(file_dir=file_dir, df=exp_df, sheet_names=sheet_names)
+
+    # create multi-level index
+    three_level_columns = create_three_level_index(df=exp_df)
+
+    # # set the multi-level index
+    exp_df_th = exp_df.copy()
+    exp_df_th.columns = pd.MultiIndex.from_tuples(three_level_columns)
+
+    return exp_df, exp_df_th
+
+
+def write_to_excel(file_dir: str, df: pd.DataFrame, sheet_names: list[str] = ["General", "Experimental"]) -> None:
+    """
+    Writes two versions of the dataframe to an excel file (one transposed and one not)
+
+    Args:
+        file_dir: The directory of the excel file
+        df: The dataframe to be written
+        sheet_names: The names of the sheets
+    """
+    with pd.ExcelWriter(file_dir, engine="openpyxl", mode="w") as writer:
+        df.to_excel(writer, sheet_name=sheet_names[0])
+        df.T.to_excel(writer, sheet_name=sheet_names[1])
+
+
+def create_unique_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transpose the dataframe and get the unique values of the Pipe TTNr column
+
+    Args:
+        df: The dataframe to be transposed
+
+    Returns:
+        A dataframe with the unique values of the Pipe TTNr column
+    """
+
+    vertical_df = pd.DataFrame()
+
+    for i in range(0, len(df.columns), 2):
+        temp = df.copy().iloc[:, i:i + 2]
+        temp.columns = ['Pipe TTNr', 'Total']
+        vertical_df = pd.concat([vertical_df, temp], axis=0, ignore_index=True)
+
+    # get the rows with unique pipes
+    unique_pipe_rows = vertical_df["Pipe TTNr"].unique()
+
+    # add the total column for the rows with same Pipe TTNr
+    for i in range(len(unique_pipe_rows)):
+        vertical_df.loc[vertical_df["Pipe TTNr"] == unique_pipe_rows[i], "Total"] = \
+            vertical_df.loc[vertical_df["Pipe TTNr"] == unique_pipe_rows[i], "Total"].sum()
+
+    # drop duplicate Pipe TTNrs
+    final_df = vertical_df.drop_duplicates(subset="Pipe TTNr",
+                                           keep="first",
+                                           inplace=False,
+                                           ignore_index=True).sort_values(by="Total", ascending=False).copy()
+    final_df = final_df.reset_index(drop=True, inplace=False).copy()
+
+    final_df['Pipe TTNr'] = final_df['Pipe TTNr'].astype(str)
+
+    return final_df
+
+
+def get_file_indexes(file_dict: dict) -> list:
+    """
+    Get the file indexes from the dictionary
+
+    Args:
+        file_dict: A dictionary with the year as the key and the files as the value
+
+    Returns:
+        A list of the file indexes
+    """
+    available_file_indexes = [{a: [c.split("_")[0][2:] for c in sorted(b)]} for a, b in file_dict.items()]
+    available_file_indexes = {k: v for d in available_file_indexes for k, v in d.items()}
+
+    return available_file_indexes
+
+
+def create_file_dict(file_dict: dict, years: list[int] = [2022, 2023]) -> dict:
+    """
+    Get the files from the given years (filtering)
+
+    Args:
+        file_dict: A dictionary with the year as the key and the files as the value
+        years: The years to be filtered
+
+    Returns:
+        A dictionary with the year as the key and the files as the value
+    Args:
+    """
+    # sort the file_dict by the file name number
+    for year, files in file_dict.items():
+        file_dict[year] = sorted(files, key=lambda x: int(x.split("_")[0][2:]))
+
+    # get the files from the given years
+    if len(years) > 1:
+        file_in_given_years = {year: file_dict[year] for year in years}
+    elif len(years) == 1:
+        file_in_given_years = {years[0]: file_dict[years[0]]}
+    elif len(years) == 0:
+        raise ValueError("The years list is empty")
+
+    return file_in_given_years
+
+
+def combine_all_files_within_threshold(file_dict: dict, master_dir: str,
+                                       threshold_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Combine all files within the given threshold into a single dataframe
+
+    Args:
+        file_dict: A dictionary with the year as the key and the files as the value
+        master_dir: The master directory of the files
+        threshold_df: A dataframe with the pipes that are within the threshold
+
+    Returns:
+        A dataframe with all the files within the threshold
+    """
+    all_in_one = pd.DataFrame()
+
+    for year, plan in file_dict.items():
+        for file in plan:
+            df = pd.read_excel(f'{master_dir}/{str(year)}/{file}', sheet_name='Pivot')
+            df = df.fillna(0)
+            df.iloc[:, 3:26] = df.iloc[:, 3:26].apply(pd.to_numeric, errors='coerce')
+
+            df['Total'] = df.iloc[:, 3:26].sum(axis=1)
+            df.loc["Hat", "Total"] = 0
+            df = df.sort_values(by=['Total'], inplace=False, ascending=False, ignore_index=True).copy()
+
+            temp = df.iloc[:, [1, -1]].copy()
+            index_name = temp.columns[0].split(" ")[3]
+            temp.index.name = index_name
+
+            temp.columns = ['Pipe TTNr', temp.columns[-1]]
+
+            temp['Pipe TTNr'] = temp['Pipe TTNr'].astype(str)
+
+            # drop the rows with NaN or non-numeric values
+            temp = temp.loc[temp["Pipe TTNr"].apply(lambda x: x.isnumeric()), :].copy()
+
+            temp['Pipe TTNr'] = temp['Pipe TTNr'].astype(int)
+
+            # filter the pipes that are in the 70
+            temp = temp.loc[temp["Pipe TTNr"].isin(threshold_df)].copy()
+
+            temp = temp.groupby('Pipe TTNr').sum().copy()
+
+            temp.reset_index(inplace=True)
+
+            # add another column level to aa
+            temp.columns = pd.MultiIndex.from_product(
+                [[pd.to_datetime(index_name, format='%d.%m.%Y').date()], temp.columns])
+
+            all_in_one = pd.concat([all_in_one, temp], axis=1, ignore_index=False)
+
+    return all_in_one
+
+
+def convert_multi_to_single_df(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Converts a multi-index dataframe to a single index dataframe
+
+    Args:
+        df: The dataframe to be converted
+
+    Returns:
+        A single index dataframe
+    """
+    df = df.reset_index(inplace=False).copy()
+    df = df.rename(columns={"index": "Date"}, inplace=False).copy()
+
+    # if there are NaN values, drop those columns
+    df = df.dropna(axis=1, inplace=False)
+
+    # drop all_in_one.columns[1::2] and make it a single column
+    pipes = df.iloc[:, 1]
+    df = df.drop(df.columns[1::2], axis=1, inplace=False)
+
+    # # insert the column as the first column
+    df.insert(1, 'Pipe TTNr', pipes)
+
+    # drop the first column
+    df = df.drop(df.columns[0], axis=1, inplace=False)
+
+    # drop the second level of the columns
+    df.columns = df.columns.droplevel(1)
+
+    # transpose the dataframe
+    df_T = df.T
+
+    # make the first row the column names
+    df_T.columns = df_T.iloc[0]
+    df_T = df_T.drop(df_T.index[0])
+
+    # convert all the column names to str
+    df_T.columns = df_T.columns.astype(int).astype(str)
+
+    return df_T
+
+
+def get_occurrences_per_file(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Gets the occurrences of each pipe in each file
+
+    Args:
+        df: The dataframe to be checked for occurences
+
+    Returns:
+        A dataframe with the occurrences of each pipe in each file
+    """
+
+    pipes_dict = {}
+
+    for i in range(0, len(df.columns), 2):
+        temp = df.copy().iloc[:, i:i + 2]
+        pipes_dict[temp.columns[0][0]] = temp[(temp.columns[0][0], 'Pipe TTNr')].unique()
+
+    # count the number of occurrences for each pipe and which weeks it occurs
+    pipe_occurrences, week_occurrences = {}, {}
+
+    for key, value in pipes_dict.items():
+        for pipe in value:
+            if pipe in pipe_occurrences.keys():
+                pipe_occurrences[pipe] += 1
+                week_occurrences[pipe].append(key)
+            else:
+                pipe_occurrences[pipe] = 1
+                week_occurrences[pipe] = [key]
+
+    merged_dict = {k: [pipe_occurrences[k], week_occurrences[k]] for k in pipe_occurrences.keys()}
+
+    # create a dataframe from the dictionary
+    pipe_occurrences_df = pd.DataFrame.from_dict(merged_dict, orient='index', columns=['Occurrences', 'Weeks'])
+    pipe_occurrences_df = pipe_occurrences_df.sort_values(by="Occurrences", ascending=False, inplace=False)
+
+    return pipe_occurrences_df
+
+
+def get_occurrences_with_threshold(df: pd.DataFrame, threshold: int = 50) -> pd.DataFrame:
+    """
+    Gets the occurrences of each pipe in each file with a threshold
+
+    Args:
+        df: The dataframe to be checked for occurences
+        threshold: The threshold for the occurrences (default: 50)
+
+    Returns:
+        A dataframe with the occurrences of each pipe in each file with a threshold
+    """
+    pipes_in_threshold_df = df.loc[df["Occurrences"] >= threshold, :].sort_values(by="Occurrences",
+                                                                                  ascending=False)
+
+    pipes_in_threshold_df = pipes_in_threshold_df.reset_index(inplace=False).copy()
+    pipes_in_threshold_df = pipes_in_threshold_df.rename(columns={"index": "Pipe TTNr"}, inplace=False).copy()
+
+    pipes_in_threshold_df = pipes_in_threshold_df['Pipe TTNr'].values
+    pipes_in_threshold_df = [int(x) for x in pipes_in_threshold_df]
+
+    return pipes_in_threshold_df
+
+
 def find_common_pipes(file_index: int,
                       file_year: int,
                       top_level_df: pd.DataFrame,
@@ -55,7 +347,7 @@ def find_common_pipes(file_index: int,
     # rename the columns
     top_20_pipes.index = pd.Index(['Pipe TTNr', 'Total'])
 
-    top_20_pipes.iloc[0, :] = top_20_pipes.iloc[0, :].astype(int)
+    # top_20_pipes.iloc[0, :] = top_20_pipes.iloc[0, :].astype(int)
 
     # insert an empty column to first position
     top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
