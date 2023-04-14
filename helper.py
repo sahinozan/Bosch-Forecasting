@@ -34,8 +34,12 @@ def find_common_pipes(file_index: int,
     """
     df = pd.read_excel(f'{master_dir}/{str(file_year)}/{file_dict[file_year][file_index]}', sheet_name='Pivot')
 
-    df.iloc[:, 5:26] = df.iloc[:, 5:26].apply(pd.to_numeric, errors='coerce')
-    df['Total'] = df.iloc[:, 5:26].sum(axis=1)
+    df.iloc[:, 3:26] = df.iloc[:, 3:26].apply(pd.to_numeric, errors='coerce')
+
+    # combine the rows with same pipe code
+    df = df.groupby(df.iloc[:, 1]).sum()
+
+    df['Total'] = df.iloc[:, 3:26].sum(axis=1)
     df.loc["Hat", "Total"] = 0
 
     # sort the dataframe by the Total column
@@ -44,18 +48,69 @@ def find_common_pipes(file_index: int,
     # transpose the dataframe and select the top 20 pipes
     top_20_pipes = df.iloc[:threshold, [1, -1]].T
 
-    # insert an empty column to first position
-    top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
+    # replace the first row with the column values
+    top_20_pipes.iloc[0, :], top_20_pipes.columns = pd.Series(
+        map(str, top_20_pipes.columns)), list(range(1, threshold + 1))
 
     # rename the columns
-    top_20_pipes.columns = ["X", *range(1, threshold + 1)]
+    top_20_pipes.index = pd.Index(['Pipe TTNr', 'Total'])
 
-    top_20_pipes.index = ['Pipe TTNr', 'Total']
+    top_20_pipes.iloc[0, :] = top_20_pipes.iloc[0, :].astype(int)
+
+    # insert an empty column to first position
+    top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
 
     # add the top 20 pipes to the top_level_df
     top_level_df = pd.concat([top_level_df, top_20_pipes], axis=0)
 
     return top_level_df
+
+
+# def find_common_pipes(file_index: int,
+#                       file_year: int,
+#                       top_level_df: pd.DataFrame,
+#                       file_dict: dict[int, list[str]],
+#                       master_dir: str,
+#                       threshold: int = 20
+#                       ) -> pd.DataFrame:
+#     """
+#     Finds the most produced pipes for the selected production plan
+
+#     Args:
+#         file_index: The file index (4, 9, 27, 36, 41,...)
+#         file_year: The file year (2021, 2022, 2023)
+#         top_level_df: The top level dataframe
+#         file_dict: The file dictionary
+#         master_dir: The master directory
+#         threshold: The number of pipes to be selected
+
+#     Returns:
+#         The top level dataframe with the most produced pipes for the selected production plan
+#     """
+#     df = pd.read_excel(f'{master_dir}/{str(file_year)}/{file_dict[file_year][file_index]}', sheet_name='Pivot')
+
+#     df.iloc[:, 5:26] = df.iloc[:, 5:26].apply(pd.to_numeric, errors='coerce')
+#     df['Total'] = df.iloc[:, 5:26].sum(axis=1)
+#     df.loc["Hat", "Total"] = 0
+
+#     # sort the dataframe by the Total column
+#     df.sort_values(by=['Total'], inplace=True, ascending=False)
+
+#     # transpose the dataframe and select the top 20 pipes
+#     top_20_pipes = df.iloc[:threshold, [1, -1]].T
+
+#     # insert an empty column to first position
+#     top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
+
+#     # rename the columns
+#     top_20_pipes.columns = ["X", *range(1, threshold + 1)]
+
+#     top_20_pipes.index = ['Pipe TTNr', 'Total']
+
+#     # add the top 20 pipes to the top_level_df
+#     top_level_df = pd.concat([top_level_df, top_20_pipes], axis=0)
+
+#     return top_level_df
 
 
 def configure_matplotlib(labelsize: int = 18,
@@ -292,33 +347,33 @@ def format_general_sheet(file_dir: str) -> None:
     ws['A2'] = "Ranking"
 
     # set the column width
-    for i in range(1, 194):
+    for i in range(1, ws.max_column + 1):
         if i % 2 == 0:
             ws.column_dimensions[get_column_letter(i)].width = 15  # type: ignore
         elif i % 2 == 1:
             ws.column_dimensions[get_column_letter(i)].width = 10  # type: ignore
 
     # set the row height
-    for i in range(1, 23):
+    for i in range(1, ws.max_row + 1):
         ws.row_dimensions[i].height = 20  # type: ignore
 
     # set the font size and alignment
-    for i in range(1, 23):
-        for j in range(1, 194):
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
             ws.cell(row=i, column=j).font = Font(size=10)
             ws.cell(row=i, column=j).alignment = Alignment(horizontal='center', vertical='center')
 
     # set the column header font size and font bold
-    for i in range(1, 194):
+    for i in range(1, ws.max_column + 1):
         ws.cell(row=1, column=i).font = Font(size=12, bold=True)
         ws.cell(row=2, column=i).font = Font(size=10, bold=True)
 
-    for i in range(1, 23):
+    for i in range(1, ws.max_row + 1):
         ws.cell(row=i, column=1).font = Font(size=10, bold=True)
 
     # create the borders
-    for i in range(1, 23):
-        for j in range(1, 194):
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
             ws.cell(row=i, column=j).border = Border(
                 left=styles.borders.Side(border_style='thin', color='000000'),
                 right=styles.borders.Side(border_style='thin',
