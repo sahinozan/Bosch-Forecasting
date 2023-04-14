@@ -66,53 +66,6 @@ def find_common_pipes(file_index: int,
     return top_level_df
 
 
-# def find_common_pipes(file_index: int,
-#                       file_year: int,
-#                       top_level_df: pd.DataFrame,
-#                       file_dict: dict[int, list[str]],
-#                       master_dir: str,
-#                       threshold: int = 20
-#                       ) -> pd.DataFrame:
-#     """
-#     Finds the most produced pipes for the selected production plan
-
-#     Args:
-#         file_index: The file index (4, 9, 27, 36, 41,...)
-#         file_year: The file year (2021, 2022, 2023)
-#         top_level_df: The top level dataframe
-#         file_dict: The file dictionary
-#         master_dir: The master directory
-#         threshold: The number of pipes to be selected
-
-#     Returns:
-#         The top level dataframe with the most produced pipes for the selected production plan
-#     """
-#     df = pd.read_excel(f'{master_dir}/{str(file_year)}/{file_dict[file_year][file_index]}', sheet_name='Pivot')
-
-#     df.iloc[:, 5:26] = df.iloc[:, 5:26].apply(pd.to_numeric, errors='coerce')
-#     df['Total'] = df.iloc[:, 5:26].sum(axis=1)
-#     df.loc["Hat", "Total"] = 0
-
-#     # sort the dataframe by the Total column
-#     df.sort_values(by=['Total'], inplace=True, ascending=False)
-
-#     # transpose the dataframe and select the top 20 pipes
-#     top_20_pipes = df.iloc[:threshold, [1, -1]].T
-
-#     # insert an empty column to first position
-#     top_20_pipes.insert(0, "X", file_dict[file_year][file_index].split("_")[0] + f"_{file_year}")
-
-#     # rename the columns
-#     top_20_pipes.columns = ["X", *range(1, threshold + 1)]
-
-#     top_20_pipes.index = ['Pipe TTNr', 'Total']
-
-#     # add the top 20 pipes to the top_level_df
-#     top_level_df = pd.concat([top_level_df, top_20_pipes], axis=0)
-
-#     return top_level_df
-
-
 def configure_matplotlib(labelsize: int = 18,
                          titlesize: int = 22,
                          titlepad: int = 25,
