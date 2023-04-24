@@ -9,6 +9,186 @@ import openpyxl
 from openpyxl import styles
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from datetime import timedelta
+from pmdarima import auto_arima
+import statsmodels.api as sm
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from statsmodels.api import tsa
+from math import sqrt
+import tensorflow as tf
+from keras.layers import Dense, LSTM, Dropout
+from keras.models import Sequential
+from sklearn.metrics import mean_squared_error
+
+
+def create_lstm_model(train: pd.Series,
+                      test: pd.Series,
+                      activation: str = 'relu') -> Any:
+
+    # reshape the copy of the data
+    train_data = train.copy().values.reshape(-1, 1)
+    test_data = test.copy().values.reshape(-1, 1)
+
+    # set the random seed
+    tf.keras.utils.set_random_seed(42)
+
+    # create the model
+    model = Sequential()
+    model.add(LSTM(50, activation=activation, input_shape=(1, 1)))
+    model.add(Dropout(0.2))
+    model.add(Dense(1))
+    model.compile(optimizer='adam', loss='mse')
+
+    # fit the model
+    model.fit(train_data, train_data, epochs=100, verbose=0)
+
+    # make predictions
+    predictions = model.predict(test_data, verbose=0)
+
+    # calculate the rmse
+    rmse = np.sqrt(mean_squared_error(test_data, predictions))
+
+    # check overfitting
+    train_predictions = model.predict(train_data, verbose=0)
+    train_rmse = np.sqrt(mean_squared_error(train_data, train_predictions))
+
+    return predictions, rmse, test_data, train_rmse
+
+
+def select_pipe_and_split_data(data: pd.DataFrame,
+                               pipe_index: int = 0,
+                               test_size: float = 0.2,
+                               split_index: int = -9,
+                               is_sklearn: bool = False) -> tuple[Any, pd.Series, pd.Series]:
+    """
+    Selects the pipe number and splits the data into train and test.
+
+    Args:
+        data: The dataframe to be split.
+        pipe_index: The index of the pipe number. Defaults to 0.
+        test_size: The size of the test data. Defaults to 0.2.
+        split_index: The index to split the data. Defaults to -9.
+        is_sklearn: Whether to use sklearn to split the data. Defaults to False.
+
+    Returns:
+        The pipe number, the train data, and the test data.
+    """
+    # get the pipe number
+    pipe_number = data.columns[pipe_index]
+
+    # get the data for the given pipe number
+    pipe_data = data[pipe_number]
+
+    if is_sklearn == True:
+        # split the data into train and test using sklearn
+        train, test = train_test_split(pipe_data, test_size=test_size, shuffle=False, random_state=42)
+    else:
+        # split the data into train and test without sklearn
+        train, test = pipe_data[:split_index], pipe_data[split_index:]
+
+    return pipe_number, train, test
+
+
+def create_and_run_the_model(train_data: pd.Series,
+                             test_data: pd.Series,
+                             out_of_sample_size: int = 15,
+                             verbose: bool = False,
+                             operation_type: str = 'prediction',
+                             model_type: str = 'arima') -> tuple[pd.Series, float]:
+    """
+    Creates and runs an ARIMA model on the given data.
+
+    Args:
+        train_data: The data to train the model on.
+        out_of_sample_size: The number of samples to predict.
+        verbose: Whether to print the model summary. 
+        operation_type: The type of operation to run.
+        model_type: The type of model to run.
+    Returns:
+        The predicted values and the RMSE.
+    """
+
+    # find the best parameters for the model
+    auto_arima_model = auto_arima(train_data, start_p=1, start_q=1,
+                                  max_p=3, max_q=3, m=12,
+                                  start_P=0, seasonal=True,
+                                  d=1, D=1, trace=False,
+                                  error_action='ignore',
+                                  suppress_warnings=True,
+                                  random_state=20, n_fits=50,
+                                  maxiter=1000, n_jobs=-1,
+                                  out_of_sample_size=out_of_sample_size,
+                                  scoring='mse')
+
+    if model_type == "sarimax":
+        model = sm.tsa.statespace.SARIMAX(train_data, order=(auto_arima_model.order),
+                                          seasonal_order=(auto_arima_model.seasonal_order),
+                                          enforce_stationarity=False,
+                                          enforce_invertibility=False)
+    elif model_type == "arima":
+        model = tsa.ARIMA(train_data, order=(auto_arima_model.order),
+                          seasonal_order=(auto_arima_model.seasonal_order),
+                          enforce_stationarity=False,
+                          enforce_invertibility=False)
+    else:
+        raise ValueError("model_type must be either 'arima' or 'sarimax'")
+
+    # fit the model
+    if model_type == "arima":
+        model_fit = model.fit()
+    else:
+        if verbose == True:
+            model_fit = model.fit(disp=1)
+        else:
+            model_fit = model.fit(disp=0)
+
+    if operation_type == "forecast":
+        # fit the model
+        predictions = model_fit.get_forecast(steps=12,
+                                             alpha=0.05,
+                                             freq='W-MON')
+        # calculate root mean squared error
+        rmse = sqrt(mean_squared_error(test_data, predictions.predicted_mean))
+    elif operation_type == "prediction":
+        # fit the model
+        predictions = model_fit.predict(start=len(train_data),
+                                        end=len(train_data)+len(test_data)-1,
+                                        dynamic=False,
+                                        typ='levels').rename('SARIMA Predictions')
+
+        # calculate root mean squared error
+        rmse = sqrt(mean_squared_error(test_data, predictions))
+    else:
+        raise ValueError("operation_type must be either 'forecast' or 'prediction'")
+
+    return predictions, rmse
+
+
+def format_time_series_df(df: pd.DataFrame,
+                          master_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Format the index column of the dataframe according to time-series guidelines
+
+    Args:
+        df: The dataframe to be formatted
+        master_df: The dataframe to be used as a reference 
+
+    Returns:
+        A formatted dataframe (time-series) with periods as the index
+    """
+    df = master_df.copy()
+
+    # reindex the all_in_one_T (start from 2022-01-06) and add 7 days for each row
+    df.index = pd.date_range(start='2022-01-06', periods=len(master_df), freq='7D')
+
+    # convert the index column to datetime
+    df.index = df.index.astype('datetime64[ns]')
+
+    # convert the index column to period
+    df.index = pd.DatetimeIndex(df.index).to_period('W')
+
+    return df
 
 
 def create_transposed_and_unique_df(master_df: pd.DataFrame, sheet_names: list[str],
@@ -192,8 +372,12 @@ def combine_all_files_within_threshold(file_dict: dict, master_dir: str,
             temp.reset_index(inplace=True)
 
             # add another column level to aa
-            temp.columns = pd.MultiIndex.from_product(
-                [[pd.to_datetime(index_name, format='%d.%m.%Y').date()], temp.columns])
+            try:
+                temp.columns = pd.MultiIndex.from_product(
+                    [[pd.to_datetime(index_name, format='%d.%m.%Y').date()], temp.columns])
+            except ValueError:
+                temp.columns = pd.MultiIndex.from_product(
+                    [[pd.to_datetime(index_name, format='%Y-%m-%d').date() + timedelta(days=1)], temp.columns])
 
             all_in_one = pd.concat([all_in_one, temp], axis=1, ignore_index=False)
 
@@ -362,6 +546,7 @@ def configure_matplotlib(labelsize: int = 18,
                          titlesize: int = 22,
                          titlepad: int = 25,
                          labelpad: int = 15,
+                         tick_major_pad: int = 10,
                          dpi: int = 200) -> None:
     """
     Configures matplotlib to use the fivethirtyeight style and the Ubuntu font.
@@ -383,6 +568,8 @@ def configure_matplotlib(labelsize: int = 18,
     plt.rcParams['axes.titleweight'] = 'bold'
     plt.rcParams['axes.titlepad'] = titlepad
     plt.rcParams['figure.dpi'] = dpi
+    plt.rcParams['xtick.major.pad'] = tick_major_pad
+    plt.rcParams['ytick.major.pad'] = tick_major_pad
 
     # change the background color of the figure
     plt.rcParams['figure.facecolor'] = 'none'
@@ -390,6 +577,20 @@ def configure_matplotlib(labelsize: int = 18,
 
     # change the color of the grid
     plt.rcParams['axes.grid'] = False
+
+
+def rgb_to_hex(r, g, b) -> str:
+    """
+    Converts an RGB color to hex. (255,255,255 -> FFFFFF)
+    Args:
+        r: The red value
+        g: The green value
+        b: The blue value
+
+    Returns:
+        The hex string
+    """
+    return '#{:02x}{:02x}{:02x}'.format(r, g, b)
 
 
 def hex_to_RGB(hex_str) -> list[int]:
@@ -487,6 +688,7 @@ def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
                          fig_size: tuple = (16, 20),
                          rotation: str = 'horizontal',
                          ascending: bool = True,
+                         years: list = [2022, 2023],
                          threshold: int = 20) -> None:
     """
     Creates a bar plot for the unique pipes
@@ -565,7 +767,7 @@ def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
     # set the font size of the y-ticks
     plt.yticks(fontsize=12)
 
-    plt.title("Overall Top Pipes (2021-2023)", pad=25)
+    plt.title(f"Overall Top Pipes {years[0]}-{years[-1]}", pad=25)
 
     plt.show()
 
