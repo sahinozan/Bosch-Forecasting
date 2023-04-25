@@ -12,7 +12,6 @@ from openpyxl.utils import get_column_letter
 from datetime import timedelta
 from pmdarima import auto_arima
 import statsmodels.api as sm
-from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import train_test_split
 from statsmodels.api import tsa
 from math import sqrt
@@ -25,7 +24,6 @@ from sklearn.metrics import mean_squared_error
 def create_lstm_model(train: pd.Series,
                       test: pd.Series,
                       activation: str = 'relu') -> Any:
-
     # reshape the copy of the data
     train_data = train.copy().values.reshape(-1, 1)
     test_data = test.copy().values.reshape(-1, 1)
@@ -66,10 +64,10 @@ def select_pipe_and_split_data(data: pd.DataFrame,
 
     Args:
         data: The dataframe to be split.
-        pipe_index: The index of the pipe number. Defaults to 0.
-        test_size: The size of the test data. Defaults to 0.2.
-        split_index: The index to split the data. Defaults to -9.
-        is_sklearn: Whether to use sklearn to split the data. Defaults to False.
+        pipe_index: The index of the pipe number.
+        test_size: The size of the test data.
+        split_index: The index to split the data.
+        is_sklearn: Whether to use sklearn to split the data.
 
     Returns:
         The pipe number, the train data, and the test data.
@@ -80,7 +78,7 @@ def select_pipe_and_split_data(data: pd.DataFrame,
     # get the data for the given pipe number
     pipe_data = data[pipe_number]
 
-    if is_sklearn == True:
+    if is_sklearn:
         # split the data into train and test using sklearn
         train, test = train_test_split(pipe_data, test_size=test_size, shuffle=False, random_state=42)
     else:
@@ -101,6 +99,7 @@ def create_and_run_the_model(train_data: pd.Series,
 
     Args:
         train_data: The data to train the model on.
+        test_data: The data to test the model on.
         out_of_sample_size: The number of samples to predict.
         verbose: Whether to print the model summary. 
         operation_type: The type of operation to run.
@@ -122,13 +121,13 @@ def create_and_run_the_model(train_data: pd.Series,
                                   scoring='mse')
 
     if model_type == "sarimax":
-        model = sm.tsa.statespace.SARIMAX(train_data, order=(auto_arima_model.order),
-                                          seasonal_order=(auto_arima_model.seasonal_order),
+        model = sm.tsa.statespace.SARIMAX(train_data, order=auto_arima_model.order,
+                                          seasonal_order=auto_arima_model.seasonal_order,
                                           enforce_stationarity=False,
                                           enforce_invertibility=False)
     elif model_type == "arima":
-        model = tsa.ARIMA(train_data, order=(auto_arima_model.order),
-                          seasonal_order=(auto_arima_model.seasonal_order),
+        model = tsa.ARIMA(train_data, order=auto_arima_model.order,
+                          seasonal_order=auto_arima_model.seasonal_order,
                           enforce_stationarity=False,
                           enforce_invertibility=False)
     else:
@@ -138,7 +137,7 @@ def create_and_run_the_model(train_data: pd.Series,
     if model_type == "arima":
         model_fit = model.fit()
     else:
-        if verbose == True:
+        if verbose:
             model_fit = model.fit(disp=1)
         else:
             model_fit = model.fit(disp=0)
@@ -153,7 +152,7 @@ def create_and_run_the_model(train_data: pd.Series,
     elif operation_type == "prediction":
         # fit the model
         predictions = model_fit.predict(start=len(train_data),
-                                        end=len(train_data)+len(test_data)-1,
+                                        end=len(train_data) + len(test_data) - 1,
                                         dynamic=False,
                                         typ='levels').rename('SARIMA Predictions')
 
@@ -165,14 +164,12 @@ def create_and_run_the_model(train_data: pd.Series,
     return predictions, rmse
 
 
-def format_time_series_df(df: pd.DataFrame,
-                          master_df: pd.DataFrame) -> pd.DataFrame:
+def format_time_series_df(master_df: pd.DataFrame) -> pd.DataFrame:
     """
     Format the index column of the dataframe according to time-series guidelines
 
     Args:
-        df: The dataframe to be formatted
-        master_df: The dataframe to be used as a reference 
+        master_df: The dataframe to be used as a reference
 
     Returns:
         A formatted dataframe (time-series) with periods as the index
@@ -185,22 +182,23 @@ def format_time_series_df(df: pd.DataFrame,
     # convert the index column to datetime
     df.index = df.index.astype('datetime64[ns]')
 
-    # convert the index column to period
+    # convert the index column to a period
     df.index = pd.DatetimeIndex(df.index).to_period('W')
 
     return df
 
 
-def create_transposed_and_unique_df(master_df: pd.DataFrame, sheet_names: list[str],
+def create_transposed_and_unique_df(master_df: pd.DataFrame,
+                                    sheet_names: list[str],
                                     file_dir) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Transpose the dataframe and create a multi-level index dataframe
-    Drop unnecessary columns and rows and write the dataframe to an excel file
+    Drop unnecessary columns and rows and write the dataframe to an Excel file
 
     Args:
         master_df: The dataframe to be transposed
         sheet_names: The names of the sheets
-        file_dir: The directory of the excel file
+        file_dir: The directory of the Excel file
 
     Returns:
         A tuple of the dataframe and the multi-level index dataframe (transposed)
@@ -231,15 +229,19 @@ def create_transposed_and_unique_df(master_df: pd.DataFrame, sheet_names: list[s
     return exp_df, exp_df_th
 
 
-def write_to_excel(file_dir: str, df: pd.DataFrame, sheet_names: list[str] = ["General", "Experimental"]) -> None:
+def write_to_excel(file_dir: str,
+                   df: pd.DataFrame,
+                   sheet_names=None) -> None:
     """
-    Writes two versions of the dataframe to an excel file (one transposed and one not)
+    Writes two versions of the dataframe to an Excel file (one transposed and one not)
 
     Args:
-        file_dir: The directory of the excel file
+        file_dir: The directory of the Excel file
         df: The dataframe to be written
         sheet_names: The names of the sheets
     """
+    if sheet_names is None:
+        sheet_names = ["General", "Experimental"]
     with pd.ExcelWriter(file_dir, engine="openpyxl", mode="w") as writer:
         df.to_excel(writer, sheet_name=sheet_names[0])
         df.T.to_excel(writer, sheet_name=sheet_names[1])
@@ -283,7 +285,7 @@ def create_unique_df(df: pd.DataFrame) -> pd.DataFrame:
     return final_df
 
 
-def get_file_indexes(file_dict: dict) -> list:
+def get_file_indexes(file_dict: dict) -> dict:
     """
     Get the file indexes from the dictionary
 
@@ -299,7 +301,8 @@ def get_file_indexes(file_dict: dict) -> list:
     return available_file_indexes
 
 
-def create_file_dict(file_dict: dict, years: list[int] = [2022, 2023]) -> dict:
+def create_file_dict(file_dict: dict,
+                     years=None) -> dict:
     """
     Get the files from the given years (filtering)
 
@@ -312,8 +315,12 @@ def create_file_dict(file_dict: dict, years: list[int] = [2022, 2023]) -> dict:
     Args:
     """
     # sort the file_dict by the file name number
+    if years is None:
+        years = [2022, 2023]
     for year, files in file_dict.items():
         file_dict[year] = sorted(files, key=lambda x: int(x.split("_")[0][2:]))
+
+    file_in_given_years = {}
 
     # get the files from the given years
     if len(years) > 1:
@@ -326,7 +333,8 @@ def create_file_dict(file_dict: dict, years: list[int] = [2022, 2023]) -> dict:
     return file_in_given_years
 
 
-def combine_all_files_within_threshold(file_dict: dict, master_dir: str,
+def combine_all_files_within_threshold(file_dict: dict,
+                                       master_dir: str,
                                        threshold_df: pd.DataFrame) -> pd.DataFrame:
     """
     Combine all files within the given threshold into a single dataframe
@@ -431,7 +439,7 @@ def get_occurrences_per_file(df: pd.DataFrame) -> pd.DataFrame:
     Gets the occurrences of each pipe in each file
 
     Args:
-        df: The dataframe to be checked for occurences
+        df: The dataframe to be checked for occurrences
 
     Returns:
         A dataframe with the occurrences of each pipe in each file
@@ -464,12 +472,13 @@ def get_occurrences_per_file(df: pd.DataFrame) -> pd.DataFrame:
     return pipe_occurrences_df
 
 
-def get_occurrences_with_threshold(df: pd.DataFrame, threshold: int = 50) -> pd.DataFrame:
+def get_occurrences_with_threshold(df: pd.DataFrame,
+                                   threshold: int = 50) -> list[int]:
     """
     Gets the occurrences of each pipe in each file with a threshold
 
     Args:
-        df: The dataframe to be checked for occurences
+        df: The dataframe to be checked for an occurrence
         threshold: The threshold for the occurrences (default: 50)
 
     Returns:
@@ -512,7 +521,7 @@ def find_common_pipes(file_index: int,
 
     df.iloc[:, 3:26] = df.iloc[:, 3:26].apply(pd.to_numeric, errors='coerce')
 
-    # combine the rows with same pipe code
+    # combine the rows with the same pipe code
     df = df.groupby(df.iloc[:, 1]).sum()
 
     df['Total'] = df.iloc[:, 3:26].sum(axis=1)
@@ -555,6 +564,7 @@ def configure_matplotlib(labelsize: int = 18,
         titlesize: The size of the title
         titlepad: The padding of the title
         labelpad: The padding of the axis labels
+        tick_major_pad: The padding of the major ticks
         dpi: The resolution of the figure
     """
     plt.rcParams['font.family'] = 'Arial'
@@ -688,7 +698,7 @@ def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
                          fig_size: tuple = (16, 20),
                          rotation: str = 'horizontal',
                          ascending: bool = True,
-                         years: list = [2022, 2023],
+                         years=None,
                          threshold: int = 20) -> None:
     """
     Creates a bar plot for the unique pipes
@@ -698,8 +708,11 @@ def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
         fig_size: The figure size
         rotation: The rotation of the x-axis labels
         ascending: If the plot should be sorted ascending or descending
+        years: The years to be considered
         threshold: The number of pipes to be selected
     """
+    if years is None:
+        years = [2022, 2023]
     configure_matplotlib()
     fig, ax = plt.subplots(figsize=fig_size)
 
@@ -775,7 +788,7 @@ def unique_pipe_bar_plot(pipe_df: pd.DataFrame,
 def format_general_sheet(file_dir: str) -> None:
     """
     Format the Excel file. This formatting involves removing the blank rows, setting the column header,
-    setting the column, row width and height and, setting the font size and alignment.
+    setting the column, row width and height and setting the font size and alignment.
 
     Args:
         file_dir: The file directory of the Excel file
@@ -835,7 +848,7 @@ def format_general_sheet(file_dir: str) -> None:
 def format_experimental_sheet(file_dir: str) -> None:
     """
     Format the Excel file. This formatting involves removing the blank rows, setting the column header,
-    setting the column, row width and height and, setting the font size and alignment.
+    setting the column, row width and height and setting the font size and alignment.
 
     Args:
         file_dir: The file directory of the Excel file
@@ -892,13 +905,13 @@ def format_experimental_sheet(file_dir: str) -> None:
 
 def create_three_level_index(df: pd.DataFrame) -> list[tuple[str | Any, ...]]:
     """
-    Creates a three level index for the dataframe
+    Creates a three-level index for the dataframe
 
     Args:
         df: The dataframe that contains the data (exp_df)
 
     Returns:
-        The three level index
+        The three-level index
     """
     final_columns = []
 
