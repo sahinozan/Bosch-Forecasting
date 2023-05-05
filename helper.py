@@ -21,39 +21,6 @@ from keras.models import Sequential
 from sklearn.metrics import mean_squared_error
 
 
-def create_lstm_model(train: pd.Series,
-                      test: pd.Series,
-                      activation: str = 'relu') -> Any:
-    # reshape the copy of the data
-    train_data = train.copy().values.reshape(-1, 1)
-    test_data = test.copy().values.reshape(-1, 1)
-
-    # set the random seed
-    tf.keras.utils.set_random_seed(42)
-
-    # create the model
-    model = Sequential()
-    model.add(LSTM(50, activation=activation, input_shape=(1, 1)))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))
-    model.compile(optimizer='adam', loss='mse')
-
-    # fit the model
-    model.fit(train_data, train_data, epochs=100, verbose=0)
-
-    # make predictions
-    predictions = model.predict(test_data, verbose=0)
-
-    # calculate the rmse
-    rmse = np.sqrt(mean_squared_error(test_data, predictions))
-
-    # check overfitting
-    train_predictions = model.predict(train_data, verbose=0)
-    train_rmse = np.sqrt(mean_squared_error(train_data, train_predictions))
-
-    return predictions, rmse, test_data, train_rmse
-
-
 def select_pipe_and_split_data(data: pd.DataFrame,
                                pipe_index: int = 0,
                                test_size: float = 0.2,
@@ -88,12 +55,12 @@ def select_pipe_and_split_data(data: pd.DataFrame,
     return pipe_number, train, test
 
 
-def create_and_run_the_model(train_data: pd.Series,
-                             test_data: pd.Series,
-                             out_of_sample_size: int = 15,
-                             verbose: bool = False,
-                             operation_type: str = 'prediction',
-                             model_type: str = 'arima') -> tuple[pd.Series, float]:
+def create_arima_model(train_data: pd.Series,
+                       test_data: pd.Series,
+                       out_of_sample_size: int = 15,
+                       verbose: bool = False,
+                       operation_type: str = 'prediction',
+                       model_type: str = 'arima') -> tuple[pd.Series, float]:
     """
     Creates and runs an ARIMA model on the given data.
 
@@ -108,28 +75,24 @@ def create_and_run_the_model(train_data: pd.Series,
         The predicted values and the RMSE.
     """
 
-    # find the best parameters for the model
-    auto_arima_model = auto_arima(train_data, start_p=1, start_q=1,
-                                  max_p=3, max_q=3, m=12,
+    # find the best parameters for the model (total: 77, test: 68, train: 9)
+    auto_arima_model = auto_arima(train_data,
+                                  m=12,
                                   start_P=0, seasonal=True,
                                   d=1, D=1, trace=False,
                                   error_action='ignore',
                                   suppress_warnings=True,
-                                  random_state=20, n_fits=50,
+                                  random_state=42, n_fits=50,
                                   maxiter=1000, n_jobs=-1,
                                   out_of_sample_size=out_of_sample_size,
                                   scoring='mse')
 
     if model_type == "sarimax":
         model = sm.tsa.statespace.SARIMAX(train_data, order=auto_arima_model.order,
-                                          seasonal_order=auto_arima_model.seasonal_order,
-                                          enforce_stationarity=False,
-                                          enforce_invertibility=False)
+                                          seasonal_order=auto_arima_model.seasonal_order)
     elif model_type == "arima":
         model = tsa.ARIMA(train_data, order=auto_arima_model.order,
-                          seasonal_order=auto_arima_model.seasonal_order,
-                          enforce_stationarity=False,
-                          enforce_invertibility=False)
+                          seasonal_order=auto_arima_model.seasonal_order)
     else:
         raise ValueError("model_type must be either 'arima' or 'sarimax'")
 
@@ -162,30 +125,6 @@ def create_and_run_the_model(train_data: pd.Series,
         raise ValueError("operation_type must be either 'forecast' or 'prediction'")
 
     return predictions, rmse
-
-
-def format_time_series_df(master_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Format the index column of the dataframe according to time-series guidelines
-
-    Args:
-        master_df: The dataframe to be used as a reference
-
-    Returns:
-        A formatted dataframe (time-series) with periods as the index
-    """
-    df = master_df.copy()
-
-    # reindex the all_in_one_T (start from 2022-01-06) and add 7 days for each row
-    df.index = pd.date_range(start='2022-01-06', periods=len(master_df), freq='7D')
-
-    # convert the index column to datetime
-    df.index = df.index.astype('datetime64[ns]')
-
-    # convert the index column to a period
-    df.index = pd.DatetimeIndex(df.index).to_period('W')
-
-    return df
 
 
 def create_transposed_and_unique_df(master_df: pd.DataFrame,
