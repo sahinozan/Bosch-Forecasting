@@ -10,15 +10,169 @@ from openpyxl import styles
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import timedelta
-from pmdarima import auto_arima
-import statsmodels.api as sm
 from sklearn.model_selection import train_test_split
-from statsmodels.api import tsa
-from math import sqrt
 import tensorflow as tf
 from keras.layers import Dense, LSTM, Dropout
 from keras.models import Sequential
 from sklearn.metrics import mean_squared_error
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from pmdarima.arima import auto_arima
+from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+import tensorflow.python.keras.backend as K
+
+
+def create_arima_model(df: pd.DataFrame,
+                       selected_pipe: str,
+                       m: int = 14,
+                       model_type: str = "sarimax",
+                       max_p: int = 3,
+                       max_q: int = 3,
+                       trace: bool = True):
+
+    # find the best parameters
+    params = auto_arima(df[selected_pipe],
+                        start_p=1, start_q=1,
+                        test='adf',
+                        max_p=max_p, max_q=max_q,
+                        m=m,
+                        d=None,
+                        seasonal=True,
+                        start_P=0,
+                        D=1,
+                        trace=trace,
+                        error_action='ignore',
+                        suppress_warnings=True,
+                        stepwise=True,
+                        random_state=42,
+                        n_fits=30)
+
+    # create the model
+    if model_type == "arima":
+        model = ARIMA(df[selected_pipe],
+                      order=params.order,
+                      seasonal_order=params.seasonal_order)
+    elif model_type == "sarimax":
+        model = SARIMAX(df[selected_pipe],
+                        order=params.order,
+                        seasonal_order=params.seasonal_order,
+                        enforce_stationarity=False,
+                        enforce_invertibility=False)
+
+    # fit the model
+    fitted = model.fit(disp=0)
+
+    # make predictions
+    predictions = fitted.predict(n_periods=7)
+
+    # make as pandas series
+    fc_series = pd.Series(predictions, index=df.index)
+
+    # calculate the confidence intervals
+    confidence_interval = fitted.conf_int(alpha=0.05)
+    lower_series = pd.Series(confidence_interval.iloc[:, 0], index=df.index)
+    upper_series = pd.Series(confidence_interval.iloc[:, 1], index=df.index)
+
+    # calculate the rmse
+    rmse = np.sqrt(mean_squared_error(df[selected_pipe], fc_series))
+
+    return fc_series, lower_series, upper_series, fitted, rmse
+
+
+def format_time_series_df(master_df: pd.DataFrame,
+                          selected_years: list) -> pd.DataFrame:
+    """
+    Format the index column of the dataframe according to time-series guidelines
+
+    Args:
+        selected_years: The years to be used as a reference
+        master_df: The dataframe to be used as a reference
+
+    Returns:
+        A formatted dataframe (time-series) with periods as the index
+    """
+    df = master_df.copy()
+
+    # reindex the all_in_one_T
+    if selected_years == [2022, 2023]:
+        df.index = pd.date_range(start='2022-01-06', periods=len(master_df), freq='W')
+    else:
+        # df.index = pd.date_range(start='2021-06-23', periods=len(master_df), freq='W')
+        df.index = pd.date_range(end='2023-03-05', periods=len(master_df), freq='W')
+
+    # convert the index column to datetime
+    df.index = df.index.astype('datetime64[ns]')
+
+    # convert the index column to a period
+    df.index = pd.DatetimeIndex(df.index).to_period('W')
+
+    return df
+
+
+def root_mean_squared_error(y_true, y_pred):
+    return K.sqrt(K.mean(K.square(y_pred - y_true)))
+
+
+def create_lstm_model(train: pd.Series,
+                      test: pd.Series,
+                      activation: str = 'relu',
+                      epoch: int = 100,
+                      unit: tuple[int, int] = (50, 0),
+                      drop_out: float = 0.2,
+                      learning_rate: float = 0.01,
+                      min_learning_rate: float = 0.0001,
+                      momentum: tuple[float, float] = (0.9, 0.999),
+                      factor: float = 0.2,
+                      patience: int = 1,
+                      reduce: bool = False,
+                      optimizer: str = "adam") -> Any:
+    # reshape the copy of the data
+    train_data = train.copy().values.reshape(-1, 1)
+    test_data = test.copy().values.reshape(-1, 1)
+
+    # set the random seed
+    tf.keras.utils.set_random_seed(42)
+
+    # create the model
+    model = Sequential()
+    model.add(LSTM(unit[0] - unit[1], activation=activation, return_sequences=False, input_shape=(None, 1)))
+    model.add(Dropout(rate=drop_out))
+    model.add(Dense(1, activation=activation))
+
+    if optimizer == "adam":
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=learning_rate, beta_1=momentum[0],
+            beta_2=momentum[1],
+            amsgrad=False)
+    elif optimizer == "sgd":
+        optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=momentum[1], nesterov=True)
+
+    model.compile(optimizer=optimizer, loss=root_mean_squared_error)
+
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=factor, patience=patience, min_lr=min_learning_rate)
+    mc = ModelCheckpoint('best_model.h5', monitor='val_loss', mode='min', verbose=0, save_best_only=True)
+
+    # fit the model
+    if reduce:
+        es = EarlyStopping(monitor='val_loss', mode='auto', verbose=1, patience=patience + 3)
+        history = model.fit(train_data, train_data, epochs=epoch, verbose=0,
+                            validation_data=(test_data, test_data), shuffle=False, callbacks=[es, mc, reduce_lr])
+    else:
+        es = EarlyStopping(monitor='val_loss', mode='auto', verbose=1, patience=patience)
+        history = model.fit(train_data, train_data, epochs=epoch, verbose=0,
+                            validation_data=(test_data, test_data), shuffle=False, callbacks=[es, mc])
+
+    # make predictions
+    predictions = model.predict(test_data, verbose=0)
+
+    # calculate the rmse
+    rmse = np.sqrt(mean_squared_error(test_data, predictions))
+
+    # calculate the loss
+    train_loss = history.history['loss']
+    val_loss = history.history['val_loss']
+
+    return predictions, rmse, test_data, train_loss, val_loss, model, es.stopped_epoch
 
 
 def select_pipe_and_split_data(data: pd.DataFrame,
@@ -53,78 +207,6 @@ def select_pipe_and_split_data(data: pd.DataFrame,
         train, test = pipe_data[:split_index], pipe_data[split_index:]
 
     return pipe_number, train, test
-
-
-def create_arima_model(train_data: pd.Series,
-                       test_data: pd.Series,
-                       out_of_sample_size: int = 15,
-                       verbose: bool = False,
-                       operation_type: str = 'prediction',
-                       model_type: str = 'arima') -> tuple[pd.Series, float]:
-    """
-    Creates and runs an ARIMA model on the given data.
-
-    Args:
-        train_data: The data to train the model on.
-        test_data: The data to test the model on.
-        out_of_sample_size: The number of samples to predict.
-        verbose: Whether to print the model summary. 
-        operation_type: The type of operation to run.
-        model_type: The type of model to run.
-    Returns:
-        The predicted values and the RMSE.
-    """
-
-    # find the best parameters for the model (total: 77, test: 68, train: 9)
-    auto_arima_model = auto_arima(train_data,
-                                  m=12,
-                                  start_P=0, seasonal=True,
-                                  d=1, D=1, trace=False,
-                                  error_action='ignore',
-                                  suppress_warnings=True,
-                                  random_state=42, n_fits=50,
-                                  maxiter=1000, n_jobs=-1,
-                                  out_of_sample_size=out_of_sample_size,
-                                  scoring='mse')
-
-    if model_type == "sarimax":
-        model = sm.tsa.statespace.SARIMAX(train_data, order=auto_arima_model.order,
-                                          seasonal_order=auto_arima_model.seasonal_order)
-    elif model_type == "arima":
-        model = tsa.ARIMA(train_data, order=auto_arima_model.order,
-                          seasonal_order=auto_arima_model.seasonal_order)
-    else:
-        raise ValueError("model_type must be either 'arima' or 'sarimax'")
-
-    # fit the model
-    if model_type == "arima":
-        model_fit = model.fit()
-    else:
-        if verbose:
-            model_fit = model.fit(disp=1)
-        else:
-            model_fit = model.fit(disp=0)
-
-    if operation_type == "forecast":
-        # fit the model
-        predictions = model_fit.get_forecast(steps=12,
-                                             alpha=0.05,
-                                             freq='W-MON')
-        # calculate root mean squared error
-        rmse = sqrt(mean_squared_error(test_data, predictions.predicted_mean))
-    elif operation_type == "prediction":
-        # fit the model
-        predictions = model_fit.predict(start=len(train_data),
-                                        end=len(train_data) + len(test_data) - 1,
-                                        dynamic=False,
-                                        typ='levels').rename('SARIMA Predictions')
-
-        # calculate root mean squared error
-        rmse = sqrt(mean_squared_error(test_data, predictions))
-    else:
-        raise ValueError("operation_type must be either 'forecast' or 'prediction'")
-
-    return predictions, rmse
 
 
 def create_transposed_and_unique_df(master_df: pd.DataFrame,
@@ -495,7 +577,9 @@ def configure_matplotlib(labelsize: int = 18,
                          titlepad: int = 25,
                          labelpad: int = 15,
                          tick_major_pad: int = 10,
-                         dpi: int = 200) -> None:
+                         dpi: int = 200,
+                         colors: tuple[str, str] = ('none', 'none'),
+                         transparent: bool = False) -> None:
     """
     Configures matplotlib to use the fivethirtyeight style and the Ubuntu font.
     Args:
@@ -521,8 +605,29 @@ def configure_matplotlib(labelsize: int = 18,
     plt.rcParams['ytick.major.pad'] = tick_major_pad
 
     # change the background color of the figure
-    plt.rcParams['figure.facecolor'] = 'none'
-    plt.rcParams['axes.facecolor'] = 'none'
+    # plt.rcParams['figure.facecolor'] = 'none'
+    # plt.rcParams['axes.facecolor'] = 'none'
+
+    if not transparent:
+        plt.rcParams.update({
+            "figure.facecolor": (0.31, 0.31, 0.31, 0.39),
+            "figure.edgecolor": (0.31, 0.31, 0.31, 0),
+            "axes.facecolor": (0.31, 0.31, 0.31, 0),
+            "axes.edgecolor": (0.31, 0.31, 0.31, 0.39),
+        })
+    else:
+        plt.rcParams.update({
+            "figure.facecolor": (0.31, 0.31, 0.31, 0),
+            "figure.edgecolor": (0.31, 0.31, 0.31, 0.39),
+            "axes.facecolor": (0.31, 0.31, 0.31, 0.39),
+            "axes.edgecolor": (0.31, 0.31, 0.31, 0.39),
+            "text.color": "black",
+            "axes.labelcolor": "black",
+        })
+
+    # remove the top and right spines
+    plt.rcParams['axes.spines.top'] = False
+    plt.rcParams['axes.spines.right'] = False
 
     # change the color of the grid
     plt.rcParams['axes.grid'] = False
@@ -579,7 +684,8 @@ def create_bar_plot(df: pd.DataFrame,
                     selected_year: int,
                     file_index: str,
                     ascending: bool = True,
-                    threshold: int = 20) -> None:
+                    threshold: int = 20,
+                    figsize: tuple[int, int] = (20, 10)) -> None:
     """
     Creates a bar plot for the selected year and file index
 
@@ -589,6 +695,7 @@ def create_bar_plot(df: pd.DataFrame,
         file_index: The file index (4, 9, 27, 36, 41,...)
         ascending: If the plot should be sorted ascending or descending
         threshold: The number of pipes to be selected
+        figsize: The size of the figure
     """
     if len(str(file_index)) == 1:
         file_index = "0" + str(file_index)
@@ -600,7 +707,7 @@ def create_bar_plot(df: pd.DataFrame,
         return None
 
     configure_matplotlib()
-    fig, ax = plt.subplots(figsize=(20, 10))
+    fig, ax = plt.subplots(figsize=figsize)
 
     # sorted plot
     sns.barplot(ax=ax,
