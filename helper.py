@@ -29,7 +29,6 @@ def create_arima_model(df: pd.DataFrame,
                        max_p: int = 3,
                        max_q: int = 3,
                        trace: bool = True):
-
     # find the best parameters
     params = auto_arima(df[selected_pipe],
                         start_p=1, start_q=1,
@@ -58,6 +57,8 @@ def create_arima_model(df: pd.DataFrame,
                         seasonal_order=params.seasonal_order,
                         enforce_stationarity=False,
                         enforce_invertibility=False)
+    else:
+        raise ValueError("model_type must be either 'arima' or 'sarimax'")
 
     # fit the model
     fitted = model.fit(disp=0)
@@ -578,7 +579,6 @@ def configure_matplotlib(labelsize: int = 18,
                          labelpad: int = 15,
                          tick_major_pad: int = 10,
                          dpi: int = 200,
-                         colors: tuple[str, str] = ('none', 'none'),
                          transparent: bool = False) -> None:
     """
     Configures matplotlib to use the fivethirtyeight style and the Ubuntu font.
@@ -589,6 +589,7 @@ def configure_matplotlib(labelsize: int = 18,
         labelpad: The padding of the axis labels
         tick_major_pad: The padding of the major ticks
         dpi: The resolution of the figure
+        transparent: Whether the figure should be transparent or not
     """
     plt.rcParams['font.family'] = 'Arial'
     plt.style.use('fivethirtyeight')
