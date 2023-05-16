@@ -44,7 +44,7 @@ def create_arima_model(df: pd.DataFrame,
                         suppress_warnings=True,
                         stepwise=True,
                         random_state=42,
-                        n_fits=30)
+                        n_fits=-1)
 
     # create the model
     if model_type == "arima":
@@ -615,6 +615,8 @@ def configure_matplotlib(labelsize: int = 18,
             "figure.edgecolor": (0.31, 0.31, 0.31, 0),
             "axes.facecolor": (0.31, 0.31, 0.31, 0),
             "axes.edgecolor": (0.31, 0.31, 0.31, 0.39),
+            "text.color": "white",
+            "axes.labelcolor": "white",
         })
     else:
         plt.rcParams.update({
