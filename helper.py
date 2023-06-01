@@ -7,6 +7,7 @@ import pandas as pd
 import seaborn as sns
 import openpyxl
 from openpyxl import styles
+from openpyxl.reader.excel import load_workbook
 from openpyxl.styles import Font, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from datetime import timedelta
@@ -20,6 +21,89 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from pmdarima.arima import auto_arima
 from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 import tensorflow.python.keras.backend as K
+from sklearn.metrics import mean_absolute_error
+
+
+def format_excel_file(file_path: str,
+                      sheet_name: str,
+                      first_column_width: int = 16,
+                      first_index: str = 'Pipe TTNr'):
+    wb = load_workbook(file_path)
+    ws = wb[sheet_name]
+
+    for i in range(1, ws.max_row + 1):
+        ws.row_dimensions[i].height = 20
+
+    for i in range(2, ws.max_column + 1):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = 20
+
+    for i in range(1, 2):
+        ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = first_column_width
+
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=i, column=j).alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=i, column=j).font = Font(size=10)
+
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=i, column=1).font = Font(size=12, bold=True)
+
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=1, column=j).font = Font(size=12, bold=True)
+
+    for i in range(1, ws.max_row + 1):
+        for j in range(1, ws.max_column + 1):
+            ws.cell(row=i, column=j).border = Border(left=Side(border_style='thin', color='000000'),
+                                                     right=Side(border_style='thin', color='000000'),
+                                                     top=Side(border_style='thin', color='000000'),
+                                                     bottom=Side(border_style='thin', color='000000'))
+
+    ws.cell(row=1, column=1).value = first_index
+
+    wb.save(file_path)
+
+
+def get_best_parameters(rmse_list: dict,
+                        mae_list: dict,
+                        mape_list: dict,
+                        mase_list: dict,
+                        best_performers: dict,
+                        pipe: str,
+                        order_dict: dict,
+                        seasonal_order_dict: dict):
+    rmse_list = {k: v for k, v in sorted(rmse_list.items(), key=lambda item: item[1])}
+    mae_list = {k: v for k, v in sorted(mae_list.items(), key=lambda item: item[1])}
+    mape_list = {k: v for k, v in sorted(mape_list.items(), key=lambda item: item[1])}
+    mase_list = {k: v for k, v in sorted(mase_list.items(), key=lambda item: item[1])}
+
+    if pipe not in best_performers.keys():
+        best_performers[pipe] = {'rmse': None, 'mae': None, 'mape': None, 'mase': None,
+                                 'order': {'rmse': None, 'mae': None, 'mape': None, 'mase': None},
+                                 'seasonal_order': {'rmse': None, 'mae': None, 'mape': None, 'mase': None}}
+
+    # root mean squared error, mean absolute error, mean absolute percentage error, mean absolute-scaled error
+    # aic = akaike information criterion
+    # bic = bayesian information criterion
+
+    best_performers[pipe]['rmse'] = list(rmse_list.keys())[0]
+    best_performers[pipe]['mae'] = list(mae_list.keys())[0]
+    best_performers[pipe]['mape'] = list(mape_list.keys())[0]
+    best_performers[pipe]['mase'] = list(mase_list.keys())[0]
+    best_performers[pipe]['order']['rmse'] = order_dict[list(rmse_list.keys())[0]]
+    best_performers[pipe]['order']['mae'] = order_dict[list(mae_list.keys())[0]]
+    best_performers[pipe]['order']['mape'] = order_dict[list(mape_list.keys())[0]]
+    best_performers[pipe]['order']['mase'] = order_dict[list(mase_list.keys())[0]]
+    best_performers[pipe]['seasonal_order']['rmse'] = seasonal_order_dict[list(rmse_list.keys())[0]]
+    best_performers[pipe]['seasonal_order']['mae'] = seasonal_order_dict[list(mae_list.keys())[0]]
+    best_performers[pipe]['seasonal_order']['mape'] = seasonal_order_dict[list(mape_list.keys())[0]]
+    best_performers[pipe]['seasonal_order']['mase'] = seasonal_order_dict[list(mase_list.keys())[0]]
+
+    return best_performers
 
 
 def create_arima_model(df: pd.DataFrame,
@@ -28,11 +112,12 @@ def create_arima_model(df: pd.DataFrame,
                        model_type: str = "sarimax",
                        max_p: int = 3,
                        max_q: int = 3,
-                       trace: bool = True):
+                       trace: bool = True,
+                       test: str = "adf"):
     # find the best parameters
     params = auto_arima(df[selected_pipe],
                         start_p=1, start_q=1,
-                        test='adf',
+                        test=test,
                         max_p=max_p, max_q=max_q,
                         m=m,
                         d=None,
@@ -44,7 +129,8 @@ def create_arima_model(df: pd.DataFrame,
                         suppress_warnings=True,
                         stepwise=True,
                         random_state=42,
-                        n_fits=-1)
+                        n_fits=10,
+                        n_jobs=-1)
 
     # create the model
     if model_type == "arima":
@@ -64,7 +150,7 @@ def create_arima_model(df: pd.DataFrame,
     fitted = model.fit(disp=0)
 
     # make predictions
-    predictions = fitted.predict(n_periods=7)
+    predictions = fitted.predict(n_periods=7, alpha=0.05)
 
     # make as pandas series
     fc_series = pd.Series(predictions, index=df.index)
@@ -74,10 +160,14 @@ def create_arima_model(df: pd.DataFrame,
     lower_series = pd.Series(confidence_interval.iloc[:, 0], index=df.index)
     upper_series = pd.Series(confidence_interval.iloc[:, 1], index=df.index)
 
-    # calculate the rmse
+    # calculate error with different metrics
     rmse = np.sqrt(mean_squared_error(df[selected_pipe], fc_series))
+    mae = mean_absolute_error(df[selected_pipe], fc_series)
+    mape = np.mean(np.abs(fc_series - df[selected_pipe]) / np.abs(df[selected_pipe])) * 100
+    mase = np.mean(np.abs(df[selected_pipe] - fc_series))
+    errors = {"rmse": rmse, "mae": mae, "mape": mape, "mase": mase}
 
-    return fc_series, lower_series, upper_series, fitted, rmse
+    return fc_series, lower_series, upper_series, fitted, errors, params.order, params.seasonal_order
 
 
 def format_time_series_df(master_df: pd.DataFrame,
@@ -579,7 +669,7 @@ def configure_matplotlib(labelsize: int = 18,
                          labelpad: int = 15,
                          tick_major_pad: int = 10,
                          dpi: int = 200,
-                         transparent: bool = False) -> None:
+                         platform: str = 'vscode') -> None:
     """
     Configures matplotlib to use the fivethirtyeight style and the Ubuntu font.
     Args:
@@ -589,7 +679,7 @@ def configure_matplotlib(labelsize: int = 18,
         labelpad: The padding of the axis labels
         tick_major_pad: The padding of the major ticks
         dpi: The resolution of the figure
-        transparent: Whether the figure should be transparent or not
+        platform: The platform on which the code is run (default: vscode)
     """
     plt.rcParams['font.family'] = 'Arial'
     plt.style.use('fivethirtyeight')
@@ -609,7 +699,7 @@ def configure_matplotlib(labelsize: int = 18,
     # plt.rcParams['figure.facecolor'] = 'none'
     # plt.rcParams['axes.facecolor'] = 'none'
 
-    if not transparent:
+    if platform == 'vscode':
         plt.rcParams.update({
             "figure.facecolor": (0.31, 0.31, 0.31, 0.39),
             "figure.edgecolor": (0.31, 0.31, 0.31, 0),
@@ -617,15 +707,17 @@ def configure_matplotlib(labelsize: int = 18,
             "axes.edgecolor": (0.31, 0.31, 0.31, 0.39),
             "text.color": "white",
             "axes.labelcolor": "white",
+            "axes.titlecolor": "white",
         })
-    else:
+    elif platform == 'pycharm':
         plt.rcParams.update({
             "figure.facecolor": (0.31, 0.31, 0.31, 0),
             "figure.edgecolor": (0.31, 0.31, 0.31, 0.39),
-            "axes.facecolor": (0.31, 0.31, 0.31, 0.39),
+            "axes.facecolor": (0.31, 0.31, 0.39, 0),
             "axes.edgecolor": (0.31, 0.31, 0.31, 0.39),
-            "text.color": "black",
-            "axes.labelcolor": "black",
+            "text.color": "white",
+            "axes.labelcolor": "white",
+            "axes.titlecolor": (0, 0, 0, 0.9),
         })
 
     # remove the top and right spines
