@@ -1,0 +1,27 @@
+# Local inputs and generated artifacts are never part of the public examples.
+/data/
+/Data/
+/outputs/
+/grid_results/
+/narrow_grid_results/
+/ray_results/
+*.xlsx
+*.xls
+*.pdf
+*.pkl
+*.pickle
+*.h5
+*.keras
+*.pt
+*.pth
+*.log
+events.out.tfevents*
+output_path.txt
+.env
+.env.*
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.DS_Store
