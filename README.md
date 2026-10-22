@@ -1,21 +1,33 @@
-# Bosch-Forecasting
+# Bosch Senior Project — Forecasting
 
-A public time-series forecasting demonstration using independently generated fictional demand. The repository name remains a historical project label. No committed sample represents company demand, material identifiers, production volumes, or fitted business parameters.
+This repository contains the forecasting work from a bachelor's senior project completed as a team in collaboration with Bosch. We explored patterns in component demand and experimented with time-series models to support production and inventory planning.
 
-**Sanitized public demo:** This project has been adapted for public sharing through synthetic-data replacement and generalization of company-specific behavior. [Read what changed and why](#sanitization-for-public-sharing).
+The original analysis depended on company-specific datasets and exports. This repository is shared as an academic portfolio project; the current public examples demonstrate the approaches using fictional demand.
 
-## Run
+## What the project covered
 
-Use Python 3.11 or newer in a virtual environment:
+- Preparing time-series data and exploring trends and seasonality.
+- Experimenting with ARIMA, seasonal ARIMA/SARIMAX, and LSTM models.
+- Comparing forecasts with observed values using error metrics.
+
+**Technologies:** Python, pandas, NumPy, statsmodels, TensorFlow/Keras, and Jupyter notebooks.
+
+## Sanitization for public sharing
+
+Original datasets, material identifiers, fitted parameter tables, saved notebook outputs, and personal paths have been removed from this version. The company-specific data parser has been replaced with a simple CSV example, and the models use illustrative settings.
+
+The sample demand is generated from scratch by `generate_demo.py`, without using original records or their statistics. Its trends and seasonal patterns are invented. Results describe only the synthetic examples and do not reproduce the original experiments or demonstrate performance on company data.
+
+## Try the example
+
+With Python 3.11 or newer, run these commands from the repository directory, preferably in a virtual environment:
 
 ```sh
 python -m pip install -r requirements.txt
 python code/demo.py --method arima
-python code/demo.py --method sarimax
-python code/demo.py --method baseline
 ```
 
-The demo holds out the final eight weeks, fits only on earlier observations, and writes forecasts and metrics to the ignored `outputs/` directory. These are illustrative results, not claims about real-world predictive performance.
+The demo holds out the final eight weeks and writes forecasts and metrics to `outputs/`. Other options are `--method sarimax` and `--method baseline`.
 
 For the optional LSTM example:
 
@@ -24,20 +36,9 @@ python -m pip install -r requirements-lstm.txt
 python code/demo.py --method lstm --epochs 5
 ```
 
-LSTM uses lagged training windows and recursive prediction. It does not use holdout values as model inputs. The small model and short training run prioritize an easy demonstration over accuracy.
+The `analysis/` and `forecasting/` folders contain notebooks for exploring the examples. Regenerate the sample data with `python generate_demo.py`.
 
-## Examples and notebooks
+## Related senior-project repositories
 
-`examples/demand.csv` contains four invented `SYN-ITEM-*` series over 96 arbitrary weeks. Recreate it with `python generate_demo.py`. The generator uses a fixed seed, a simple sine wave, a small trend, and random noise. It does not read or preserve statistics from any original dataset.
-
-The notebooks in `analysis/` and `forecasting/` contain only source cells; saved outputs and machine metadata are omitted. Install Jupyter to open them. The parser and export examples use the fictional CSV. The forecasting notebooks require the corresponding dependencies above.
-
-## Sanitization for public sharing
-
-This edition demonstrates the project's technical ideas while excluding operational records and personal information. The sample data is generated from scratch by `generate_demo.py`, without reading original records or deriving values from their statistics. Identifiers, quantities, dates, trends, and seasonal patterns in the examples are invented.
-
-Original spreadsheets, material tables, fitted parameter dictionaries, notebook outputs, and personal filesystem paths have been removed. The original corporate spreadsheet parser has been replaced with a documented `date,item_id,quantity` CSV schema. ARIMA, seasonal ARIMA, and LSTM remain as generic examples, with newly chosen illustrative settings.
-
-Identifying document and notebook metadata have also been removed from the published files. The public demo starts with a fresh initial commit containing the sanitized edition. These changes are described as **sanitization and synthetic-data replacement**. New forecasts and metrics describe only the fictional examples and do not reproduce the original experiments or establish performance on operational data.
-
-Run the checks with `python -m pip install pytest` and `python -m pytest tests`. The optional LSTM check skips if TensorFlow is unavailable.
+- [Excel Integration](https://github.com/sahinozan/Bosch-Excel-Integration) — production-plan processing and Excel reporting.
+- [Reinforcement Learning](https://github.com/sahinozan/Bosch-Reinforcement-Learning) — a custom inventory environment and reinforcement learning experiments.
